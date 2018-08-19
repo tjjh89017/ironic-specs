@@ -13,7 +13,7 @@ https://bugs.launchpad.net/ironic/+bug/1576661
 The proposed feature enables the provisioning of instances using the
 BitTorrent protocol. Peer-to-peer sharing can reduce load on image
 storage and network when simultaneously provisioning multiple instances
-with the same image.
+with the same and large image.
 
 Problem description
 ===================
@@ -78,41 +78,26 @@ object storage via HTTP. The HTTP server must support the HTTP/1.1
 Accept-Ranges extension in order to perform this role (Swift_ supports this).
 
 The implementation of BitTorrent provisioning could be considered as
-3 independent tasks:
+3 tasks:
 
 * A BitTorrent client to download and share images.
 
-  A BitTorrent client should be installed on the agent ramdisk (e.g Aria2_,
-  it is a lightweight multi-protocol utility, which supports BitTorrent
-  and Metalink).
+  EZIO_ should be installed on the agent ramdisk.
+
+  EZIO_ is a BitTorrent client which can distribute the filesystem and
+  read/write to disk directly without any other temporary storage. That means
+  images are not limited by RAM size in BM nodes. It uses a
+  BitTorrent-compatible protocol to transfer filesystem data that could use
+  general BitTorrent client to seed and proxy through other region.
 
   Every BitTorrent client, the node being deployed, will announce to the
   tracker a number times during the course of a download to update its peers
   information.
 
-* A mechanism for discovering peers (tracker, DHT_, LPD_).
+* A mechanism for discovering peers (tracker).
 
   In current spec it's proposed to use the BitTorrent tracker. For example
   qbittorrent (qbittorent-nox_).
-  It's possible to avoid tracker requirement by using BitTorrent extensions
-  like LPD_ and DHT_. But this approach has some drawbacks.
-
-  LPD_ can suffer from race conditions, when peers start sharing at similar
-  times. The peers - the nodes being deployed - have a short lifetime,
-  limited to the duration of deployment. Due to the relatively large discovery
-  interval (5 minutes) recommended by the `LPD specification`_, this issue may
-  persist for the entire duration of deployment. So BitTorrent clients don't
-  allow to configure discovery interval due `LPD specification`_
-  recommendation. Also sending LSD announce very often on large networks may
-  cause multicast storms.
-  It's also possible that multicast could be disabled on deployment network
-  due security reasons.
-
-  DHT_ requires at least one node (a node is a client/server listening on
-  a UDP port implementing the distributed hash table protocol, and keep DHT
-  table) to be permanently available. It could be running on the conductor
-  host. The protocol is based on Kademila_ and is implemented over UDP. So
-  this makes it no easier to manage than a tracker.
 
   A BitTorrent tracker is a simple web service which responds to requests
   from BitTorrent clients. The requests include metrics from clients that
@@ -126,12 +111,12 @@ The implementation of BitTorrent provisioning could be considered as
 
   Torrent files contain the URL of the torrent tracker, the block size of
   the file(s) and the SHA-1 checksums for each block of the file(s) being
-  transferred. Linux tools for creating torrent files include ctorrent_,
-  transmission_, and mktorrent_.
+  transferred. partclone_ and partclone_create_torrent.py_ can generate
+  the filesystem bitmap and block info to create torrent files.
 
   So the storage for torrent files is required, Artifact Repository (Glare_)
-  would be best choice here. Operators will create torrent file using standard
-  tools and upload it to Glare_ and provide link to it via image property
+  would be best choice here. Operators will create torrent file using 
+  partclone_ and upload it to Glare_ and provide link to it via image property
   ``torrent_file=<glare id>'`` (it's possible to support glance UUIDs and http
   URLs as well, URI schemes could be used to distinguish torrent file source,
   like ``glare://uuid``, ``glance://uuid``, ``http://path/``). Later on the
@@ -176,11 +161,6 @@ But this doesn't have big impact on the overall deployment performance,
 the difference between image downloading time and API request delay is
 insignificant.
 
-The spec doesn't consider PEX_ extension, as it could not be used on its own
-to introduce a new peer to a swarm. PEX_ allows peers in a swarm to exchange
-information about the swarm directly without asking the tracker or the DHT_.
-So it could be used for future enhancements.
-
 The final workflow for operators looks like:
 
 * configure Ironic to use BitTorrent provisioning
@@ -204,14 +184,8 @@ Alternatives
   directly from the object store via a temporary URL. Also the conductors
   would need some image retention policy.
 
-* Using DHT_ and LPD_ instead of tracker, as mentioned in proposed section.
-
 * Create a new service which will perform torrent provisioning, like Glance
   in previous suggestion.
-
-* Using magnet_ links. But we still need to get image metadata somewhere, and
-  at start of deploying, we don't have seeds at all, as we are using web seed,
-  so there is no benefit of it.
 
 Data model impact
 -----------------
@@ -262,18 +236,20 @@ Ramdisk impact
 --------------
 
 The agent should be able to get the torrent metadata and provide
-it to the BitTorrent client.
+it to EZIO_.
 
-Also some BitTorrent client should be installed on the ramdisk.
+Also EZIO_ should be installed on the ramdisk.
 
 Security impact
 ---------------
 
-There will be no changes in image fetching mechanism, only one more
-protocol will be used - BitTorrent.
+EZIO_ should disable all peer exchange extension (e.g. DHT_) to protect
+from leaking sensitive images or data.
 
 Other end user impact
 ---------------------
+
+The user has to translate the image to EZIO-compatible format via partclone_.
 
 The user has to specify which images require torrent provisioning. It
 could be done by providing an additional image property:
@@ -399,7 +375,11 @@ References
 
 .. _webseed: http://www.bittorrent.org/beps/bep_0019.html
 
-.. _Aria2: https://aria2.github.io
+.. _EZIO: https://github.com/tjjh89017/ezio
+
+.. _partclone: https://github.com/mangokingTW/partclone
+
+.. _partclone_create_torrent: https://github.com/tjjh89017/ezio/blob/master/utils/partclone_create_torrent.py
 
 .. _qbittorent-nox: https://github.com/qbittorrent/qBittorrent/wiki/Running-qBittorrent-without-X-server
 
