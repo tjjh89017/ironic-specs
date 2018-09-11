@@ -315,9 +315,8 @@ Assignee(s)
 -----------
 
 Primary assignee:
-  * ashestakov
-  * aarefiev
-
+  * TBD
+  
 Work Items
 ----------
 
